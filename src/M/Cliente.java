@@ -8,6 +8,7 @@ package M;
  *
  * @author gervi
  */
+import C.ControladorClientes;
 import java.io.Serializable;
 import java.util.Vector;
 import java.util.Objects;
@@ -80,12 +81,14 @@ public boolean eliminarVehiculo(String placa) {
     }
 
     // ---- Lógica de cliente "Oro" ----
-    public void incrementarServicios() {
-        serviciosCompletados++;
-        if (serviciosCompletados >= 4) { // Sección D: 4 servicios
-            this.tipo = "Oro";
-        }
+public void incrementarServicios() {
+    serviciosCompletados++;
+    if (serviciosCompletados >= 4 && !this.tipo.equalsIgnoreCase("Oro")) {
+        this.tipo = "Oro";
+        ControladorClientes.getInstancia().guardarClientes(); // Guardar el cambio
     }
+}
+
 
     // ---- Getters ----
     public String getDpi() { return dpi; }

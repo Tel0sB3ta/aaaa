@@ -4,8 +4,13 @@
  */
 package V;
 import C.ControladorClientes;
+import C.ControladorServicios;
 import C.ControladorVehiculos;
+import C.GestorTaller;
 import M.Cliente;
+import M.Factura;
+import M.OrdenTrabajo;
+import M.Servicio;
 import M.Vehiculo;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
@@ -14,11 +19,15 @@ import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.Vector;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -31,8 +40,11 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
+import java.text.NumberFormat;
 /**
  *
  * @author gervi
@@ -42,48 +54,265 @@ public class VentanaCliente extends javax.swing.JFrame {
     private ControladorVehiculos controladorVehiculos;
     private Cliente clienteActual;
     private DefaultTableModel tableModel;
-    
-    // Constructor modificado para recibir el cliente
+    private Timer timerProgreso;
+
     public VentanaCliente(Cliente cliente) {
         initComponents();
         this.clienteActual = cliente;
         controlador = ControladorClientes.getInstancia();
         controladorVehiculos = new ControladorVehiculos(controlador);
         
-        // Configurar la tabla
         configurarTablaVehiculos();
+        configurarTablaProgreso();
         cargarVehiculosCliente();
+        configurarProgreso();
         
         this.setLocationRelativeTo(null);
         this.setTitle("Taller Mecánico USAC - Cliente: " + cliente.getNombreCompleto());
     }
+    public class CustomTableCellRenderer extends DefaultTableCellRenderer {
+    private NumberFormat numberFormat = NumberFormat.getCurrencyInstance();
     
-    private void configurarTablaVehiculos() {
+    @Override
+    protected void setValue(Object value) {
+        if (value instanceof Number) {
+            setText(numberFormat.format(value));
+            setHorizontalAlignment(RIGHT);
+        } else {
+            setText(value == null ? "" : value.toString());
+            setHorizontalAlignment(LEFT);
+        }
+    }
+}
+        private void configurarTablaVehiculos() {
         tableModel = new DefaultTableModel(
             new Object[]{"Placa", "Marca", "Modelo", "Imagen"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
+            
+            @Override
+            public Class<?> getColumnClass(int column) {
+                return String.class;
+            }
         };
+        
         jTable1.setModel(tableModel);
         
-        // Ajustar el ancho de las columnas
-        jTable1.getColumnModel().getColumn(0).setPreferredWidth(100); // Placa
-        jTable1.getColumnModel().getColumn(1).setPreferredWidth(100); // Marca
-        jTable1.getColumnModel().getColumn(2).setPreferredWidth(150); // Modelo
-        jTable1.getColumnModel().getColumn(3).setPreferredWidth(200); // Imagen
+        // Configurar el renderizador personalizado
+        CustomTableCellRenderer renderer = new CustomTableCellRenderer();
+        for (int i = 0; i < jTable1.getColumnCount(); i++) {
+            jTable1.getColumnModel().getColumn(i).setCellRenderer(renderer);
+        }
         
-        // Agregar listener para mostrar la imagen cuando se selecciona un vehículo
+        // Ajustar el ancho de las columnas
+        jTable1.getColumnModel().getColumn(0).setPreferredWidth(100);
+        jTable1.getColumnModel().getColumn(1).setPreferredWidth(100);
+        jTable1.getColumnModel().getColumn(2).setPreferredWidth(150);
+        jTable1.getColumnModel().getColumn(3).setPreferredWidth(200);
+        
+        // Listener para mostrar imágenes
         jTable1.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 int selectedRow = jTable1.getSelectedRow();
                 if (selectedRow != -1) {
-                    String rutaFoto = (String) jTable1.getValueAt(selectedRow, 3);
+                    String rutaFoto = (String) tableModel.getValueAt(selectedRow, 3);
                     mostrarImagenVehiculo(rutaFoto);
                 }
             }
         });
+    }
+
+    private void mostrarFacturasCliente() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("<html><h2>Facturas del Cliente</h2><ul>");
+    
+    // Obtener todas las facturas del cliente
+    for (OrdenTrabajo orden : GestorTaller.getInstancia().getOrdenesCompletadas()) {
+        if (orden.getCliente().equals(clienteActual)) {
+            Factura factura = new Factura(orden);
+            sb.append("<li>")
+              .append("Orden #").append(orden.getNumeroOrden()).append(" - ")
+              .append(orden.getServicio().getNombreServicio()).append(" - ")
+              .append("Q").append(orden.getServicio().getPrecioTotal())
+              .append("</li>");
+        }
+    }
+    
+    sb.append("</ul></html>");
+    
+    JOptionPane.showMessageDialog(this, sb.toString(), 
+        "Facturas de " + clienteActual.getNombreCompleto(), 
+        JOptionPane.INFORMATION_MESSAGE);
+}
+    private void configurarProgreso() {
+        // Configurar combo boxes
+        actualizarComboVehiculos();
+        actualizarComboServicios();
+        
+        // Configurar timer para actualizar progreso cada segundo
+        timerProgreso = new Timer(1000, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                actualizarProgreso();
+            }
+        });
+        timerProgreso.start();
+    }
+    
+    private void actualizarComboVehiculos() {
+        DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>();
+        model.addElement(""); // Elemento vacío inicial
+        
+        for (Vehiculo v : clienteActual.getVehiculos()) {
+            model.addElement(v.getPlaca());
+        }
+        jComboBox1.setModel(model);
+        jComboBox1.setSelectedIndex(0); // Seleccionar el elemento vacío
+    }
+    
+    private void actualizarComboServicios() {
+        DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>();
+        model.addElement(""); // Elemento vacío inicial
+        
+        if (jComboBox1.getSelectedItem() != null && !jComboBox1.getSelectedItem().toString().isEmpty()) {
+            String placa = (String) jComboBox1.getSelectedItem();
+            Vehiculo vehiculo = obtenerVehiculoPorPlaca(placa);
+            
+            if (vehiculo != null) {
+                Vector<Servicio> servicios = ControladorServicios.getInstancia()
+                    .getServiciosCompatibles(vehiculo);
+                
+                for (Servicio s : servicios) {
+                    model.addElement(s.getNombreServicio());
+                }
+            }
+        }
+        jComboBox2.setModel(model);
+        jComboBox2.setSelectedIndex(0); // Seleccionar el elemento vacío
+    }
+    
+    private Vehiculo obtenerVehiculoPorPlaca(String placa) {
+        for (Vehiculo v : clienteActual.getVehiculos()) {
+            if (v.getPlaca().equalsIgnoreCase(placa)) {
+                return v;
+            }
+        }
+        return null;
+    }
+    
+    private void actualizarProgreso() {
+        // Actualizar tablas de progreso
+        Vector<OrdenTrabajo> enEspera = GestorTaller.getInstancia().getOrdenesEnEspera();
+        Vector<OrdenTrabajo> enServicio = GestorTaller.getInstancia().getOrdenesEnServicio();
+        Vector<OrdenTrabajo> completadas = GestorTaller.getInstancia().getOrdenesCompletadas();
+        
+        // Actualizar barras de progreso
+        actualizarBarraProgreso(jProgressBar1, enEspera.size());
+        actualizarBarraProgreso(jProgressBar2, enServicio.size());
+        actualizarBarraProgreso(jProgressBar3, completadas.size());
+        
+        // Actualizar tabla de progreso
+        DefaultTableModel model = (DefaultTableModel) jTable2.getModel();
+        model.setRowCount(0);
+        
+        // Mostrar solo las órdenes del cliente actual
+        agregarOrdenesATabla(model, enEspera, "En espera");
+        agregarOrdenesATabla(model, enServicio, "En servicio");
+        agregarOrdenesATabla(model, completadas, "Completado");
+    }
+    
+    private void actualizarBarraProgreso(javax.swing.JProgressBar barra, int cantidad) {
+        // Máximo 10 órdenes mostradas en la barra de progreso
+        int valor = Math.min(cantidad * 10, 100);
+        barra.setValue(valor);
+        barra.setString(cantidad + " órdenes");
+        barra.setStringPainted(true);
+    }
+    
+    private void agregarOrdenesATabla(DefaultTableModel model, Vector<OrdenTrabajo> ordenes, String estado) {
+        NumberFormat currencyFormat = NumberFormat.getCurrencyInstance();
+        
+        for (OrdenTrabajo orden : ordenes) {
+            if (orden.getCliente().equals(clienteActual)) {
+                model.addRow(new Object[]{
+                    orden.getNumeroOrden(),
+                    orden.getVehiculo().getPlaca(),
+                    estado,
+                    orden.getServicio().getNombreServicio(),
+                    "Q" + currencyFormat.format(orden.getServicio().getPrecioTotal())
+                });
+            }
+        }
+    }
+    
+    private void solicitarServicio() {
+    String placa = (String) jComboBox1.getSelectedItem();
+    String nombreServicio = (String) jComboBox2.getSelectedItem();
+    
+    if (placa == null || placa.isEmpty() || nombreServicio == null || nombreServicio.isEmpty()) {
+        JOptionPane.showMessageDialog(this, "Seleccione un vehículo y un servicio", 
+            "Error", JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+    
+    Vehiculo vehiculo = obtenerVehiculoPorPlaca(placa);
+    Servicio servicio = ControladorServicios.getInstancia().buscarServicioPorNombre(nombreServicio);
+    
+    if (vehiculo == null || servicio == null) {
+        JOptionPane.showMessageDialog(this, "Error al seleccionar vehículo o servicio", 
+            "Error", JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+    
+    // Mostrar confirmación con precio
+    int confirm = JOptionPane.showConfirmDialog(this, 
+        "¿Confirmar servicio?\n\n" +
+        "Vehículo: " + vehiculo.getPlaca() + "\n" +
+        "Servicio: " + servicio.getNombreServicio() + "\n" +
+        "Precio: Q" + servicio.getPrecioTotal(),
+        "Confirmar Servicio", JOptionPane.YES_NO_OPTION);
+    
+    if (confirm != JOptionPane.YES_OPTION) {
+        return;
+    }
+    
+    // Crear orden de trabajo
+    OrdenTrabajo orden = new OrdenTrabajo(vehiculo, clienteActual, servicio);
+    GestorTaller.getInstancia().agregarOrden(orden);
+    
+    // La factura se muestra automáticamente en agregarOrden()
+}
+    
+    private void configurarTablaProgreso() {
+        DefaultTableModel model = new DefaultTableModel(
+            new Object[]{"Orden", "Placa", "Estado", "Servicio", "Total"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+            
+            @Override
+            public Class<?> getColumnClass(int column) {
+                switch (column) {
+                    case 0: return Integer.class;
+                    case 1: return String.class;
+                    case 2: return String.class;
+                    case 3: return String.class;
+                    case 4: return String.class;
+                    default: return Object.class;
+                }
+            }
+        };
+        
+        jTable2.setModel(model);
+        
+        // Configurar renderizador personalizado
+        CustomTableCellRenderer renderer = new CustomTableCellRenderer();
+        for (int i = 0; i < jTable2.getColumnCount(); i++) {
+            jTable2.getColumnModel().getColumn(i).setCellRenderer(renderer);
+        }
     }
     
     private void cargarVehiculosCliente() {
@@ -107,7 +336,6 @@ public class VentanaCliente extends javax.swing.JFrame {
                 ImageIcon icon = new ImageIcon(rutaFoto);
                 Image img = icon.getImage();
                 
-                // Escalar la imagen para que se ajuste al JLabel
                 int ancho = jLabel1.getWidth();
                 int alto = jLabel1.getHeight();
                 
@@ -188,7 +416,6 @@ public class VentanaCliente extends javax.swing.JFrame {
         JButton btnEliminar = new JButton("Eliminar");
         DialogData datos = new DialogData();
         
-        // Configurar acción al presionar Enter en cualquier campo
         KeyListener enterKeyListener = new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -202,7 +429,6 @@ public class VentanaCliente extends javax.swing.JFrame {
         txtMarca.addKeyListener(enterKeyListener);
         txtModelo.addKeyListener(enterKeyListener);
         
-        // Panel para contener la imagen con scroll
         JScrollPane scrollPane = new JScrollPane(lblFoto);
         scrollPane.setPreferredSize(new Dimension(150, 150));
         
@@ -216,7 +442,6 @@ public class VentanaCliente extends javax.swing.JFrame {
                 cargarImagen(datos.rutaFoto, lblFoto);
             }
         } else {
-            // Ocultar botón Eliminar si es nuevo vehículo
             btnEliminar.setVisible(false);
         }
         
@@ -232,7 +457,6 @@ public class VentanaCliente extends javax.swing.JFrame {
             }
         });
         
-        // Configurar acción del botón Guardar
         btnGuardar.addActionListener(e -> {
             String placa = txtPlaca.getText().trim();
             String marca = txtMarca.getText().trim();
@@ -251,7 +475,6 @@ public class VentanaCliente extends javax.swing.JFrame {
                 return;
             }
             
-            // Verificar placa única solo si es nuevo o la placa cambió
             if (esNuevo || !placa.equalsIgnoreCase(datos.placa)) {
                 if (controladorVehiculos.existePlaca(placa)) {
                     JOptionPane.showMessageDialog(panel, 
@@ -263,20 +486,15 @@ public class VentanaCliente extends javax.swing.JFrame {
             
             try {
                 if (esNuevo) {
-                    // Agregar nuevo vehículo
                     controlador.agregarVehiculo(clienteActual.getDpi(), placa, marca, modelo, datos.rutaFoto);
                 } else {
-                    // Actualizar vehículo existente
-                    // Primero eliminar el vehículo antiguo
                     controladorVehiculos.eliminarVehiculo(clienteActual.getDpi(), datos.placa);
-                    // Luego agregar el vehículo actualizado
                     controlador.agregarVehiculo(clienteActual.getDpi(), placa, marca, modelo, datos.rutaFoto);
                 }
                 
-                // Actualizar la lista de vehículos
                 cargarVehiculosCliente();
+                actualizarComboVehiculos();
                 
-                // Cerrar el diálogo
                 Window window = SwingUtilities.getWindowAncestor(panel);
                 if (window != null) {
                     window.dispose();
@@ -293,7 +511,6 @@ public class VentanaCliente extends javax.swing.JFrame {
             }
         });
         
-        // Configurar acción del botón Eliminar
         btnEliminar.addActionListener(e -> {
             int confirm = JOptionPane.showConfirmDialog(panel, 
                 "¿Está seguro de eliminar este vehículo?", "Confirmar", 
@@ -306,8 +523,8 @@ public class VentanaCliente extends javax.swing.JFrame {
                     
                     if (eliminado) {
                         cargarVehiculosCliente();
+                        actualizarComboVehiculos();
                         
-                        // Cerrar el diálogo después de eliminar
                         Window window = SwingUtilities.getWindowAncestor(panel);
                         if (window != null) {
                             window.dispose();
@@ -329,7 +546,6 @@ public class VentanaCliente extends javax.swing.JFrame {
             }
         });
         
-        // Añadir componentes con GridBagLayout
         gbc.gridx = 0;
         gbc.gridy = 0;
         panel.add(new JLabel("Placa:"), gbc);
@@ -364,7 +580,6 @@ public class VentanaCliente extends javax.swing.JFrame {
         gbc.fill = GridBagConstraints.CENTER;
         panel.add(btnSeleccionarFoto, gbc);
         
-        // Panel para botones Guardar y Eliminar
         JPanel panelBotones = new JPanel(new GridLayout(1, 2, 10, 0));
         panelBotones.add(btnGuardar);
         if (!esNuevo) {
@@ -374,7 +589,6 @@ public class VentanaCliente extends javax.swing.JFrame {
         gbc.gridy = 5;
         panel.add(panelBotones, gbc);
         
-        // Crear el diálogo con tamaño fijo
         JDialog dialog = new JDialog();
         dialog.setTitle(esNuevo ? "Agregar Vehículo" : "Modificar Vehículo");
         dialog.setModal(true);
@@ -427,8 +641,18 @@ public class VentanaCliente extends javax.swing.JFrame {
         jPanel4 = new javax.swing.JPanel();
         jComboBox1 = new javax.swing.JComboBox<>();
         jLabel2 = new javax.swing.JLabel();
-        jPanel7 = new javax.swing.JPanel();
-        jPanel8 = new javax.swing.JPanel();
+        jLabel3 = new javax.swing.JLabel();
+        jComboBox2 = new javax.swing.JComboBox<>();
+        jButton3 = new javax.swing.JButton();
+        jScrollPane2 = new javax.swing.JScrollPane();
+        jTable2 = new javax.swing.JTable();
+        jProgressBar1 = new javax.swing.JProgressBar();
+        jLabel4 = new javax.swing.JLabel();
+        jProgressBar2 = new javax.swing.JProgressBar();
+        jLabel5 = new javax.swing.JLabel();
+        jProgressBar3 = new javax.swing.JProgressBar();
+        jLabel6 = new javax.swing.JLabel();
+        jButton4 = new javax.swing.JButton();
         jButton1 = new javax.swing.JButton();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
@@ -501,7 +725,7 @@ public class VentanaCliente extends javax.swing.JFrame {
                     .addGroup(jPanel2Layout.createSequentialGroup()
                         .addContainerGap()
                         .addComponent(jScrollPane1, javax.swing.GroupLayout.PREFERRED_SIZE, 440, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 104, Short.MAX_VALUE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 160, Short.MAX_VALUE)
                         .addComponent(jLabel1, javax.swing.GroupLayout.PREFERRED_SIZE, 320, javax.swing.GroupLayout.PREFERRED_SIZE)))
                 .addContainerGap())
         );
@@ -537,7 +761,8 @@ public class VentanaCliente extends javax.swing.JFrame {
 
         jPanel4.setBackground(new java.awt.Color(204, 204, 204));
 
-        jComboBox1.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
+        jComboBox1.setBackground(new java.awt.Color(255, 255, 255));
+        jComboBox1.setForeground(new java.awt.Color(0, 0, 0));
         jComboBox1.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 jComboBox1ActionPerformed(evt);
@@ -547,32 +772,164 @@ public class VentanaCliente extends javax.swing.JFrame {
         jLabel2.setForeground(new java.awt.Color(0, 0, 0));
         jLabel2.setText("Automovil");
 
+        jLabel3.setForeground(new java.awt.Color(0, 0, 0));
+        jLabel3.setText("Servicio");
+
+        jComboBox2.setBackground(new java.awt.Color(255, 255, 255));
+        jComboBox2.setForeground(new java.awt.Color(0, 0, 0));
+        jComboBox2.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jComboBox2ActionPerformed(evt);
+            }
+        });
+
+        jButton3.setBackground(new java.awt.Color(255, 255, 255));
+        jButton3.setFont(new java.awt.Font("Dialog", 3, 14)); // NOI18N
+        jButton3.setForeground(new java.awt.Color(0, 0, 0));
+        jButton3.setText("<html><center>Solicitar<br>servicios</center></html> ");
+        jButton3.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
+        jButton3.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton3ActionPerformed(evt);
+            }
+        });
+
+        jTable2.setModel(new javax.swing.table.DefaultTableModel(
+            new Object [][] {
+
+            },
+            new String [] {
+                "Repuesto", "Marca", "Modelo", "Existencias", "Precio"
+            }
+        ) {
+            Class[] types = new Class [] {
+                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.Integer.class, java.lang.Double.class
+            };
+
+            public Class getColumnClass(int columnIndex) {
+                return types [columnIndex];
+            }
+        });
+        jTable2.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent evt) {
+                jTable2MouseClicked(evt);
+            }
+        });
+        jScrollPane2.setViewportView(jTable2);
+
+        jProgressBar1.setBackground(new java.awt.Color(204, 204, 204));
+        jProgressBar1.setForeground(new java.awt.Color(153, 255, 153));
+        jProgressBar1.setToolTipText("");
+
+        jLabel4.setForeground(new java.awt.Color(0, 0, 0));
+        jLabel4.setText("Cola de espera");
+
+        jProgressBar2.setBackground(new java.awt.Color(204, 204, 204));
+        jProgressBar2.setForeground(new java.awt.Color(153, 255, 153));
+        jProgressBar2.setToolTipText("");
+
+        jLabel5.setForeground(new java.awt.Color(0, 0, 0));
+        jLabel5.setText("En servicio");
+
+        jProgressBar3.setBackground(new java.awt.Color(204, 204, 204));
+        jProgressBar3.setForeground(new java.awt.Color(153, 255, 153));
+        jProgressBar3.setToolTipText("");
+
+        jLabel6.setForeground(new java.awt.Color(0, 0, 0));
+        jLabel6.setText("Entrega");
+
+        jButton4.setBackground(new java.awt.Color(255, 255, 255));
+        jButton4.setFont(new java.awt.Font("Dialog", 3, 14)); // NOI18N
+        jButton4.setForeground(new java.awt.Color(0, 0, 0));
+        jButton4.setText("Facturas");
+        jButton4.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
+        jButton4.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton4ActionPerformed(evt);
+            }
+        });
+
         javax.swing.GroupLayout jPanel4Layout = new javax.swing.GroupLayout(jPanel4);
         jPanel4.setLayout(jPanel4Layout);
         jPanel4Layout.setHorizontalGroup(
             jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel4Layout.createSequentialGroup()
-                .addContainerGap()
-                .addComponent(jLabel2)
-                .addGap(18, 18, 18)
-                .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(735, Short.MAX_VALUE))
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(jScrollPane2)
+                    .addGroup(jPanel4Layout.createSequentialGroup()
+                        .addContainerGap()
+                        .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel4Layout.createSequentialGroup()
+                                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addGroup(jPanel4Layout.createSequentialGroup()
+                                        .addComponent(jLabel2)
+                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                        .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, 706, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                    .addGroup(jPanel4Layout.createSequentialGroup()
+                                        .addComponent(jLabel3)
+                                        .addGap(18, 18, 18)
+                                        .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, 710, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                .addComponent(jButton3, javax.swing.GroupLayout.PREFERRED_SIZE, 127, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                .addGroup(jPanel4Layout.createSequentialGroup()
+                                    .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                                        .addComponent(jProgressBar2, javax.swing.GroupLayout.DEFAULT_SIZE, 700, Short.MAX_VALUE)
+                                        .addComponent(jProgressBar1, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(jLabel4)
+                                        .addComponent(jLabel5)))
+                                .addGroup(jPanel4Layout.createSequentialGroup()
+                                    .addComponent(jProgressBar3, javax.swing.GroupLayout.PREFERRED_SIZE, 700, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addComponent(jLabel6)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                    .addComponent(jButton4, javax.swing.GroupLayout.PREFERRED_SIZE, 127, javax.swing.GroupLayout.PREFERRED_SIZE))))))
+                .addContainerGap(16, Short.MAX_VALUE))
         );
         jPanel4Layout.setVerticalGroup(
             jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel4Layout.createSequentialGroup()
                 .addContainerGap()
-                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jLabel2)
-                    .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addContainerGap(258, Short.MAX_VALUE))
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(jPanel4Layout.createSequentialGroup()
+                        .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel2)
+                            .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel3)
+                            .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                    .addComponent(jButton3, javax.swing.GroupLayout.PREFERRED_SIZE, 58, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(18, 18, 18)
+                .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 137, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jProgressBar1, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(jPanel4Layout.createSequentialGroup()
+                        .addGap(9, 9, 9)
+                        .addComponent(jLabel4)))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jProgressBar2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jLabel5))
+                .addGap(18, 18, 18)
+                .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jProgressBar3, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(jPanel4Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                        .addComponent(jLabel6)
+                        .addComponent(jButton4)))
+                .addGap(0, 38, Short.MAX_VALUE))
         );
 
         javax.swing.GroupLayout jPanel3Layout = new javax.swing.GroupLayout(jPanel3);
         jPanel3.setLayout(jPanel3Layout);
         jPanel3Layout.setHorizontalGroup(
             jPanel3Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addComponent(jPanel4, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+            .addGroup(jPanel3Layout.createSequentialGroup()
+                .addComponent(jPanel4, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(0, 0, Short.MAX_VALUE))
         );
         jPanel3Layout.setVerticalGroup(
             jPanel3Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -580,32 +937,6 @@ public class VentanaCliente extends javax.swing.JFrame {
         );
 
         jTabbedPane1.addTab("Progreso", jPanel3);
-
-        jPanel8.setBackground(new java.awt.Color(204, 204, 204));
-
-        javax.swing.GroupLayout jPanel8Layout = new javax.swing.GroupLayout(jPanel8);
-        jPanel8.setLayout(jPanel8Layout);
-        jPanel8Layout.setHorizontalGroup(
-            jPanel8Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 876, Short.MAX_VALUE)
-        );
-        jPanel8Layout.setVerticalGroup(
-            jPanel8Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGap(0, 290, Short.MAX_VALUE)
-        );
-
-        javax.swing.GroupLayout jPanel7Layout = new javax.swing.GroupLayout(jPanel7);
-        jPanel7.setLayout(jPanel7Layout);
-        jPanel7Layout.setHorizontalGroup(
-            jPanel7Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addComponent(jPanel8, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-        );
-        jPanel7Layout.setVerticalGroup(
-            jPanel7Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addComponent(jPanel8, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-        );
-
-        jTabbedPane1.addTab("Facturas", jPanel7);
 
         jButton1.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -629,14 +960,12 @@ public class VentanaCliente extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
+        timerProgreso.stop();
         Login v1 = new Login();
         v1.setVisible(true);
         this.dispose();
-    }//GEN-LAST:event_jButton1ActionPerformed
 
-    private void jComboBox1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jComboBox1ActionPerformed
-        // TODO add your handling code here:
-    }//GEN-LAST:event_jComboBox1ActionPerformed
+    }//GEN-LAST:event_jButton1ActionPerformed
 
     private void jButton2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton2ActionPerformed
     agregarVehiculo();
@@ -651,6 +980,26 @@ public class VentanaCliente extends javax.swing.JFrame {
             modificarVehiculo();
         }
     }//GEN-LAST:event_jTable1MouseClicked
+
+    private void jTable2MouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_jTable2MouseClicked
+        // TODO add your handling code here:
+    }//GEN-LAST:event_jTable2MouseClicked
+
+    private void jButton3ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton3ActionPerformed
+    solicitarServicio();
+    }//GEN-LAST:event_jButton3ActionPerformed
+
+    private void jComboBox2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jComboBox2ActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_jComboBox2ActionPerformed
+
+    private void jComboBox1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jComboBox1ActionPerformed
+    actualizarComboServicios();
+    }//GEN-LAST:event_jComboBox1ActionPerformed
+
+    private void jButton4ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton4ActionPerformed
+    mostrarFacturasCliente();
+    }//GEN-LAST:event_jButton4ActionPerformed
 
     /**
      * @param args the command line arguments
@@ -668,18 +1017,28 @@ public class VentanaCliente extends javax.swing.JFrame {
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JButton jButton1;
     private javax.swing.JButton jButton2;
+    private javax.swing.JButton jButton3;
+    private javax.swing.JButton jButton4;
     private javax.swing.JButton jButton6;
     private javax.swing.JComboBox<String> jComboBox1;
+    private javax.swing.JComboBox<String> jComboBox2;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
+    private javax.swing.JLabel jLabel3;
+    private javax.swing.JLabel jLabel4;
+    private javax.swing.JLabel jLabel5;
+    private javax.swing.JLabel jLabel6;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
     private javax.swing.JPanel jPanel3;
     private javax.swing.JPanel jPanel4;
-    private javax.swing.JPanel jPanel7;
-    private javax.swing.JPanel jPanel8;
+    private javax.swing.JProgressBar jProgressBar1;
+    private javax.swing.JProgressBar jProgressBar2;
+    private javax.swing.JProgressBar jProgressBar3;
     private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JScrollPane jScrollPane2;
     private javax.swing.JTabbedPane jTabbedPane1;
     private javax.swing.JTable jTable1;
+    private javax.swing.JTable jTable2;
     // End of variables declaration//GEN-END:variables
 }
